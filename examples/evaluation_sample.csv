@@ -1,0 +1,7 @@
+true_zone,predicted_zone,lighting,glasses
+center,center,front,none
+left,left,front,none
+right,right,front,none
+up,unknown,low,clear
+down,down,front,clear
+away,away,backlit,none

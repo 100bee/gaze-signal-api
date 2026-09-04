@@ -1,0 +1,59 @@
+[build-system]
+requires = ["hatchling==1.27.0", "editables==0.5"]
+build-backend = "hatchling.build"
+
+[project]
+name = "gaze-signal-api"
+version = "0.1.0"
+description = "Local-first API for observable webcam gaze and presence signals"
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+license = { text = "MIT" }
+authors = [{ name = "GazeSignal contributors" }]
+dependencies = [
+  "fastapi==0.116.1",
+  "numpy==2.2.6",
+  "pydantic==2.11.7",
+  "pydantic-settings==2.10.1",
+  "sqlalchemy==2.0.41",
+  "uvicorn[standard]==0.35.0",
+]
+
+[project.optional-dependencies]
+vision = [
+  "mediapipe==0.10.33",
+  "opencv-contrib-python==5.0.0.93",
+]
+yolo = [
+  "ultralytics==8.4.115",
+  "opencv-python==5.0.0.93",
+]
+dev = [
+  "httpx==0.28.1",
+  "pytest==8.4.1",
+  "pytest-asyncio==1.1.0",
+  "pytest-cov==6.2.1",
+  "ruff==0.12.7",
+]
+
+[project.scripts]
+gaze-signal-api = "gaze_signal_api.main:run"
+gaze-signal-preview = "gaze_signal_api.preview:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/gaze_signal_api"]
+
+[tool.pytest.ini_options]
+addopts = "-q --strict-markers"
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]
+ignore = ["B008"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S101"]

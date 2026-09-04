@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>GazeSignal · Local signal console</title>
+  <style>
+    :root { color-scheme: dark; --bg:#0b1020; --panel:#151d32; --ink:#eef3ff; --muted:#98a7c5; --line:#293653; --accent:#70e1c1; --warn:#ffca72; --bad:#ff7d91; }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family:Inter,ui-sans-serif,system-ui,-apple-system,sans-serif; background:radial-gradient(circle at 10% 0,#172746 0,transparent 34%),var(--bg); color:var(--ink); }
+    main { width:min(1000px,calc(100% - 32px)); margin:36px auto 80px; }
+    header { display:flex; justify-content:space-between; gap:24px; align-items:flex-start; margin-bottom:24px; }
+    h1 { margin:0 0 8px; font-size:clamp(28px,5vw,50px); letter-spacing:-.04em; }
+    h2 { margin:0 0 16px; font-size:18px; }
+    p { color:var(--muted); line-height:1.6; }
+    .badge { white-space:nowrap; padding:10px 14px; background:#10182a; border:1px solid var(--line); border-radius:999px; color:var(--muted); }
+    .dot { display:inline-block; width:9px; height:9px; border-radius:50%; background:#67738a; margin-right:8px; }
+    .dot.on { background:var(--accent); box-shadow:0 0 0 5px #70e1c122; }
+    .grid { display:grid; grid-template-columns:1fr 1.4fr; gap:18px; }
+    .panel { padding:22px; background:#111a2cee; border:1px solid var(--line); border-radius:18px; box-shadow:0 18px 50px #0005; }
+    label { display:block; margin:12px 0 7px; color:var(--muted); font-size:13px; }
+    input,select { width:100%; padding:11px 12px; color:var(--ink); background:#0b1221; border:1px solid var(--line); border-radius:10px; }
+    label.check { display:flex; gap:10px; align-items:flex-start; color:var(--ink); font-size:14px; }
+    label.check input { width:auto; margin-top:3px; }
+    button { border:0; padding:11px 16px; border-radius:10px; background:var(--accent); color:#062219; font-weight:750; cursor:pointer; }
+    button.secondary { background:#273552; color:var(--ink); }
+    button.danger { background:#4b2635; color:#ffdce2; }
+    button:disabled { opacity:.45; cursor:not-allowed; }
+    .actions { display:flex; flex-wrap:wrap; gap:9px; margin-top:18px; }
+    .metrics { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
+    .metric { min-height:92px; padding:14px; background:#0b1221; border:1px solid var(--line); border-radius:12px; }
+    .metric span { display:block; color:var(--muted); font-size:12px; margin-bottom:9px; }
+    .metric strong { font-size:20px; overflow-wrap:anywhere; }
+    .privacy { margin-top:18px; padding:14px 16px; border-left:3px solid var(--warn); background:#3b2d1645; color:#ffdda5; font-size:13px; line-height:1.6; }
+    #error { min-height:22px; color:var(--bad); font-size:13px; }
+    #calibrationOverlay { position:fixed; inset:0; z-index:50; background:#050812; display:none; }
+    #calibrationOverlay.active { display:block; }
+    #target { position:absolute; width:28px; height:28px; margin:-14px; border:5px solid var(--accent); border-radius:50%; box-shadow:0 0 0 12px #70e1c126,0 0 35px #70e1c1; transition:left .2s,top .2s; }
+    #calibrationMessage { position:absolute; left:50%; top:50%; transform:translate(-50%,70px); text-align:center; color:var(--muted); }
+    #cancelCalibration { position:absolute; right:24px; top:24px; }
+    code { font-family:ui-monospace,SFMono-Regular,monospace; }
+    @media (max-width:760px) { header { display:block; } .badge { display:inline-block; margin-top:12px; } .grid { grid-template-columns:1fr; } .metrics { grid-template-columns:1fr 1fr; } }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <div>
+      <h1>GazeSignal</h1>
+      <p>인지적 집중도를 판정하지 않고, 화면 응시와 얼굴 부재 등 관찰 가능한 신호만 로컬에서 처리합니다.</p>
+    </div>
+    <div class="badge"><span id="cameraDot" class="dot"></span><span id="cameraText">카메라 꺼짐</span></div>
+  </header>
+  <div class="grid">
+    <section class="panel">
+      <h2>세션 설정</h2>
+      <label for="camera">카메라 인덱스</label>
+      <input id="camera" type="number" min="0" max="32" value="0">
+      <label for="fps">처리 FPS</label>
+      <input id="fps" type="number" min="1" max="60" value="15">
+      <label class="check"><input id="yolo" type="checkbox"> 낮은 주기로 휴대폰 감지 사용</label>
+      <label for="pattern">캘리브레이션 표적 수</label>
+      <select id="pattern"><option value="5">5점</option><option value="9">9점</option></select>
+      <label class="check"><input id="consent" type="checkbox"> 카메라 영상이 이 기기 안에서 분석되는 것에 명시적으로 동의합니다.</label>
+      <div class="actions">
+        <button id="start">세션 생성·시작</button>
+        <button id="stop" class="secondary" disabled>중지</button>
+        <button id="calibrate" class="secondary" disabled>캘리브레이션</button>
+        <button id="remove" class="danger" disabled>세션 데이터 삭제</button>
+        <button id="removeCalibration" class="danger" disabled>캘리브레이션 삭제</button>
+      </div>
+      <p id="error"></p>
+      <div class="privacy">원본 영상은 저장·전송되지 않습니다. 화면 내용, 키 입력, 창 제목, 신원, 감정도 수집하지 않습니다. 세션의 파생 신호와 캘리브레이션 계수는 각각 별도로 삭제할 수 있습니다.</div>
+    </section>
+    <section class="panel">
+      <h2>최신 파생 신호</h2>
+      <div class="metrics">
+        <div class="metric"><span>상태</span><strong id="state">—</strong></div>
+        <div class="metric"><span>시선 영역</span><strong id="zone">—</strong></div>
+        <div class="metric"><span>얼굴</span><strong id="face">—</strong></div>
+        <div class="metric"><span>머리 yaw / pitch</span><strong id="pose">—</strong></div>
+        <div class="metric"><span>휴대폰</span><strong id="phone">—</strong></div>
+        <div class="metric"><span>신뢰도 / 지연</span><strong id="quality">—</strong></div>
+      </div>
+      <p>세션 ID: <code id="sessionId">없음</code></p>
+      <p>캘리브레이션하지 않은 기본 모드는 신뢰도가 제한됩니다. 정확도 평가는 개인·조명·안경·머리 자세별로 별도 수행해야 합니다.</p>
+    </section>
+  </div>
+</main>
+<div id="calibrationOverlay" aria-hidden="true">
+  <button id="cancelCalibration" class="danger">취소</button>
+  <div id="target"></div>
+  <div id="calibrationMessage">머리는 편하게 고정하고 표적의 가운데를 바라보세요.<br><strong id="targetProgress"></strong><br><span id="sampleProgress"></span></div>
+</div>
+<script>
+  let sessionId = null;
+  let socket = null;
+  let calibrationId = null;
+  let calibrationRun = null;
+  const $ = id => document.getElementById(id);
+  const setCamera = on => { $('cameraDot').classList.toggle('on', on); $('cameraText').textContent = on ? '카메라 분석 중' : '카메라 꺼짐'; };
+  const setError = (message, success=false) => { $('error').style.color=success?'var(--accent)':'var(--bad)'; $('error').textContent=message; };
+  const api = async (path, options={}) => {
+    const response = await fetch(path, {headers:{'content-type':'application/json'}, ...options});
+    if (!response.ok) { const body = await response.json().catch(()=>({})); throw new Error(body?.error?.message || `HTTP ${response.status}`); }
+    return response.status === 204 ? null : response.json();
+  };
+  $('start').onclick = async () => {
+    setError('');
+    if (!$('consent').checked) { setError('명시적 카메라 동의가 필요합니다.'); return; }
+    let createdId = null;
+    try {
+      const payload = {consent_given:true,camera_index:Number($('camera').value),frame_width:640,frame_height:480,target_fps:Number($('fps').value),yolo_enabled:$('yolo').checked};
+      if (calibrationId) { payload.calibration_id=calibrationId; payload.screen_width=screen.width; payload.screen_height=screen.height; }
+      const session = await api('/sessions', {method:'POST', body:JSON.stringify(payload)});
+      createdId = session.id; sessionId = createdId; $('sessionId').textContent = sessionId;
+      await api(`/sessions/${sessionId}/start`, {method:'POST'});
+      const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      socket = new WebSocket(`${protocol}//${location.host}/ws/sessions/${sessionId}`);
+      socket.onmessage = message => {
+        const e = JSON.parse(message.data);
+        $('state').textContent=e.state; $('zone').textContent=e.gaze_zone;
+        $('face').textContent=e.face_analysis_available ? (e.face_present?'감지':'부재') : '분석 불가';
+        $('pose').textContent=`${e.head_yaw.toFixed(1)}° / ${e.head_pitch.toFixed(1)}°`;
+        $('phone').textContent=e.phone_visible?'노출':'미감지'; $('quality').textContent=`${Math.round(e.confidence*100)}% / ${e.processing_latency_ms.toFixed(0)}ms`;
+        collectCalibrationSample(e);
+      };
+      socket.onerror = () => setError('실시간 신호 연결에 문제가 생겼습니다. 세션 상태를 확인하세요.');
+      setCamera(true); $('start').disabled=true; $('stop').disabled=false; $('calibrate').disabled=Boolean(calibrationId); $('remove').disabled=true; $('removeCalibration').disabled=true;
+    } catch (error) {
+      socket?.close(); socket=null;
+      if (createdId) await api(`/sessions/${createdId}`, {method:'DELETE'}).catch(()=>{});
+      sessionId=null; $('sessionId').textContent='없음'; setError(error.message); setCamera(false);
+    }
+  };
+  $('stop').onclick = async () => {
+    try { await api(`/sessions/${sessionId}/stop`, {method:'POST'}); socket?.close(); setCamera(false); $('stop').disabled=true; $('calibrate').disabled=true; $('remove').disabled=false; $('removeCalibration').disabled=!calibrationId; }
+    catch (error) { setError(error.message); }
+  };
+  $('remove').onclick = async () => {
+    try { await api(`/sessions/${sessionId}`, {method:'DELETE'}); sessionId=null; $('sessionId').textContent='없음'; $('remove').disabled=true; $('start').disabled=false; $('removeCalibration').disabled=!calibrationId; }
+    catch (error) { setError(error.message); }
+  };
+  $('removeCalibration').onclick = async () => {
+    try {
+      await api(`/calibrations/${calibrationId}`, {method:'DELETE'}); calibrationId=null;
+      $('removeCalibration').disabled=true; setError('캘리브레이션 계수를 삭제했습니다.', true);
+    } catch (error) { setError(error.message); }
+  };
+  const pointSets = {
+    5: [[.5,.5],[.12,.5],[.88,.5],[.5,.12],[.5,.88]],
+    9: [[.5,.5],[.12,.12],[.5,.12],[.88,.12],[.12,.5],[.88,.5],[.12,.88],[.5,.88],[.88,.88]]
+  };
+  const showTarget = () => {
+    const [x,y] = calibrationRun.points[calibrationRun.index];
+    $('target').style.left=`${x*100}%`; $('target').style.top=`${y*100}%`;
+    $('targetProgress').textContent=`${calibrationRun.index+1} / ${calibrationRun.points.length}`;
+    $('sampleProgress').textContent='시선 안정화 중…';
+    calibrationRun.startedAt=performance.now(); calibrationRun.count=0;
+    const expectedIndex=calibrationRun.index;
+    setTimeout(()=>{
+      if(calibrationRun && calibrationRun.index===expectedIndex && calibrationRun.count<5){
+        calibrationRun=null; $('calibrationOverlay').classList.remove('active');
+        if(document.fullscreenElement) document.exitFullscreen().catch(()=>{});
+        setError('유효한 눈 특징을 충분히 수집하지 못했습니다. 조명·카메라·Face Landmarker 모델을 확인하세요.');
+      }
+    },6000);
+  };
+  const collectCalibrationSample = event => {
+    if (!calibrationRun) return;
+    const elapsed=performance.now()-calibrationRun.startedAt;
+    if (elapsed < 700) return;
+    if (!event.face_analysis_available || !event.face_present || event.confidence < .25 || event.gaze_feature_x == null || event.gaze_feature_y == null) {
+      $('sampleProgress').textContent='얼굴과 눈 특징을 다시 찾는 중…'; return;
+    }
+    const [target_x,target_y] = calibrationRun.points[calibrationRun.index];
+    calibrationRun.samples.push({target_x,target_y,feature_x:event.gaze_feature_x,feature_y:event.gaze_feature_y,confidence:event.confidence,head_yaw:event.head_yaw,head_pitch:event.head_pitch,head_roll:event.head_roll});
+    calibrationRun.count++;
+    $('sampleProgress').textContent=`유효 샘플 ${calibrationRun.count}개 수집`;
+    if (elapsed >= 1700 && calibrationRun.count >= 5) {
+      calibrationRun.index++;
+      if (calibrationRun.index < calibrationRun.points.length) showTarget(); else finishCalibration();
+    }
+  };
+  const finishCalibration = async () => {
+    const run=calibrationRun; calibrationRun=null; $('calibrationOverlay').classList.remove('active');
+    if (document.fullscreenElement) await document.exitFullscreen().catch(()=>{});
+    try {
+      const saved=await api('/calibrations',{method:'POST',body:JSON.stringify({label:'browser guided setup',pattern_points:run.points.length,camera_index:Number($('camera').value),camera_width:640,camera_height:480,screen_width:screen.width,screen_height:screen.height,samples:run.samples})});
+      calibrationId=saved.id;
+      await api(`/sessions/${sessionId}/stop`,{method:'POST'}); socket?.close();
+      await api(`/sessions/${sessionId}`,{method:'DELETE'}); sessionId=null; $('sessionId').textContent='없음'; setCamera(false);
+      setError(`캘리브레이션 저장 완료 · 적합 RMSE ${saved.parameters.root_mean_squared_error.toFixed(3)}. 새 세션을 시작하세요.`, true);
+      $('start').disabled=false; $('stop').disabled=true; $('calibrate').disabled=true; $('remove').disabled=true; $('removeCalibration').disabled=false;
+    } catch(error) { setError(error.message); $('stop').disabled=false; }
+  };
+  $('calibrate').onclick = async () => {
+    const points=pointSets[Number($('pattern').value)];
+    calibrationRun={points,index:0,samples:[],startedAt:0,count:0}; $('calibrationOverlay').classList.add('active');
+    await $('calibrationOverlay').requestFullscreen().catch(()=>{}); showTarget();
+  };
+  const cancelCalibration = async message => {
+    calibrationRun=null; $('calibrationOverlay').classList.remove('active');
+    if(document.fullscreenElement) await document.exitFullscreen().catch(()=>{});
+    if(message) setError(message);
+  };
+  $('cancelCalibration').onclick = () => cancelCalibration('캘리브레이션을 취소했습니다.');
+  document.addEventListener('fullscreenchange', () => {
+    if(calibrationRun && !document.fullscreenElement) cancelCalibration('전체 화면이 종료되어 캘리브레이션을 취소했습니다.');
+  });
+</script>
+</body>
+</html>

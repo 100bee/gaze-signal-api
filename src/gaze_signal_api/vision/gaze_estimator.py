@@ -60,11 +60,9 @@ class GazeEstimator:
             or abs(head_pose.pitch) >= self.pitch_away_degrees
         ):
             # Keep the derived eye feature available to calibration/diagnostics even
-            # when the coarse head-pose rule classifies this frame as away.
-            confidence = face_confidence * 0.8
-            if self.calibration is None:
-                confidence = min(0.4, confidence)
-            return GazeEstimate(GazeZone.AWAY, feature_x, feature_y, confidence)
+            # when the coarse head-pose rule classifies this frame as away. Head pose
+            # needs no calibration, so this path is not capped like the iris path.
+            return GazeEstimate(GazeZone.AWAY, feature_x, feature_y, face_confidence * 0.8)
 
         if self.calibration is not None:
             screen_x, screen_y = apply_calibration(feature_x, feature_y, self.calibration)

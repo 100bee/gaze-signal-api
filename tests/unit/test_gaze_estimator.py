@@ -48,11 +48,12 @@ def test_calibrated_gaze_uses_affine_mapping() -> None:
     assert estimate.confidence == 0.95
 
 
-def test_extreme_head_pose_is_away_without_iris_classification() -> None:
+def test_extreme_head_pose_is_away_without_calibration() -> None:
     estimate = GazeEstimator().estimate(landmarks_with_centered_irises(), HeadPose(yaw=40), 0.8)
     assert estimate.zone == GazeZone.AWAY
     assert estimate.feature_x == pytest.approx(0.5)
-    assert estimate.confidence == 0.4
+    # Above the default 0.45 state gate, so an uncalibrated session can report looking_away.
+    assert estimate.confidence == pytest.approx(0.64)
 
 
 @pytest.mark.parametrize(

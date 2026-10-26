@@ -90,8 +90,6 @@ def _normalized_eyes(width: int, height: int) -> tuple[tuple[float, float, float
 
 
 @pytest.mark.parametrize(("width", "height"), [(640, 480), (1280, 720), (480, 640)])
-def test_eye_aspect_ratio_matches_pixel_geometry_at_any_resolution(
-    width: int, height: int
-) -> None:
+def test_eye_aspect_ratio_matches_pixel_geometry_at_any_resolution(width: int, height: int) -> None:
     ratio = eye_aspect_ratio(_normalized_eyes(width, height), width / height)
     assert ratio == pytest.approx(18 / 60)

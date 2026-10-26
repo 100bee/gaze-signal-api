@@ -1,192 +1,60 @@
 # GazeSignal API
 
-> Privacy-conscious, webcam-based visual session signals over REST and WebSocket.
+> 웹캠 영상을 내 컴퓨터 안에서만 분석해, 시선 방향과 얼굴 상태를 REST와 WebSocket으로 알려 주는 API
 
-GazeSignal API는 일반 웹캠 영상을 로컬에서 실시간 처리하여 **거친 시선 방향, 얼굴 존재,
-머리 자세, 눈 깜빡임, 선택적 휴대폰 노출**을 구조화된 이벤트로 제공하는 컴퓨터 비전
-API입니다. 원본 영상 대신 파생 신호만 FastAPI REST API와 WebSocket으로 전달하므로 기존
-웹·데스크톱 애플리케이션에 비전 기능을 별도 서비스처럼 연결할 수 있습니다.
+GazeSignal API는 일반 웹캠으로 다음 신호를 실시간으로 만듭니다.
 
-이 프로젝트는 사용자의 집중도, 감정, 정직성, 능력 또는 의도를 추론하지 않습니다.
-`looking_away`, `face_missing`, `phone_visible` 같은 값은 센서 관찰 결과이며 사람에 대한 판정이나
-자동 의사결정이 아닙니다.
+- 대략적인 시선 구역: 가운데, 왼쪽, 오른쪽, 위, 아래, 화면 밖, 판정 불가
+- 얼굴이 화면에 있는지 여부
+- 머리 방향: 좌우 회전, 위아래 기울기, 옆 기울기
+- 눈 깜빡임
+- 휴대폰이 보이는지 여부 (선택 기능)
 
-## 프로젝트가 제공하는 것
+원본 영상은 저장하지도, 내보내지도 않습니다. 밖으로 나가는 것은 위 신호를 담은 숫자와 상태값뿐입니다.
+그래서 웹 서비스나 데스크톱 앱에 별도 서비스처럼 붙여 쓸 수 있습니다.
 
-- 명시적 카메라 동의를 전제로 한 세션 생성·시작·중지·삭제
-- MediaPipe 얼굴·눈·홍채 랜드마크 기반 시선 특징 추출
-- OpenCV `solvePnP` 기반 yaw·pitch·roll 추정
-- `center`, `left`, `right`, `up`, `down`, `away`, `unknown` 시선 구역
-- 얼굴 존재, 눈 깜빡임, 분석기 가용성, 신뢰도 및 처리 지연 이벤트
-- 5점·9점 화면 캘리브레이션과 개인별 중립 머리 자세 보정
-- 선택적 Ultralytics YOLO 휴대폰 감지
-- REST 세션 관리, WebSocket 실시간 이벤트, SQLite 세션 요약
-- 실제 카메라 영상 위에 결과를 표시하는 로컬 라이브 미리보기
-- 카메라 연결 해제, 느린 소비자, 선택 모델 실패를 고려한 런타임 복구
+> **이 API가 하지 않는 일**
+> 집중도, 감정, 정직성, 능력, 의도를 추론하지 않습니다. `looking_away`, `face_missing`,
+> `phone_visible`은 카메라가 관찰한 사실일 뿐, 사람에 대한 판정이나 자동 결정의 근거가 아닙니다.
+> 전문 적외선 아이트래커를 대신하지도 않습니다. 정확한 픽셀 좌표가 아니라 화면의 큰 구역만 추정합니다.
 
-GazeSignal API는 전문 적외선 아이트래커를 대체하지 않습니다. 일반 RGB 웹캠과 얼굴
-랜드마크로 **대략적인 화면 구역**을 추정하며, 정밀한 픽셀 좌표나 시선 고정(fixation) 측정값을
-보장하지 않습니다.
+## 목차
 
-## 동작 방식
+- [지원 환경](#지원-환경)
+- [설치와 실행: macOS](#설치와-실행-macos)
+- [설치와 실행: Windows](#설치와-실행-windows)
+- [처음 써 보기](#처음-써-보기)
+- [API 사용 예](#api-사용-예)
+- [설정](#설정)
+- [휴대폰 감지 켜기](#휴대폰-감지-켜기)
+- [동작 원리](#동작-원리)
+- [개인정보 보호](#개인정보-보호)
+- [테스트](#테스트)
+- [알려진 한계](#알려진-한계)
+- [활용 분야와 확장](#활용-분야와-확장)
 
-```mermaid
-flowchart LR
-    Camera[Webcam] --> Capture[OpenCV capture thread]
-    Capture -->|latest frame only| Buffer[Size-one frame buffer]
-    Buffer --> Vision[MediaPipe + OpenCV vision]
-    Vision -. optional .-> YOLO[YOLO phone detector]
-    Vision --> Temporal[EMA + majority + debounce]
-    YOLO --> Temporal
-    Temporal --> DB[(SQLite derived events)]
-    Temporal --> WS[WebSocket latest event]
-    DB --> REST[FastAPI REST]
-    WS --> Client[Integrating application]
-    REST --> Client
+## 지원 환경
+
+| 항목 | 지원 | 비고 |
+|---|---|---|
+| macOS | Apple Silicon(M1 이상), macOS 13 이상 | 실제 MacBook 카메라로 검증함 |
+| Windows | Windows 10/11 64비트 (x64) | 설치 파일은 제공되나 실기기 검증 전 |
+| Python | 3.11 또는 3.12 | 3.13 이상은 아직 지원하지 않음 |
+| Intel Mac, ARM Windows | 지원 안 됨 | MediaPipe가 해당 설치 파일을 제공하지 않음 |
+
+모든 명령은 저장소 최상위 폴더에서 실행합니다. 모델 파일과 `.env`를 그 위치 기준으로 찾기 때문입니다.
+
+## 설치와 실행: macOS
+
+**1. Python 3.12 설치**
+
+```bash
+brew install python@3.12
 ```
 
-카메라 thread와 분석 thread 사이에는 최신 프레임 하나만 유지합니다. 분석 속도가 카메라보다
-느려져도 오래된 프레임과 지연이 계속 쌓이지 않습니다. 분석 결과에는 EMA, 구역 다수결,
-debounce, 최소 지속 시간을 적용하여 한 프레임의 흔들림이 즉시 상태 전환이 되는 것을 줄입니다.
+Homebrew가 없다면 [python.org](https://www.python.org/downloads/macos/)에서 3.12 설치 파일을 받아도 됩니다.
 
-원본 프레임은 `Camera → Buffer → Vision` 경로를 벗어나지 않습니다. SQLite, REST,
-WebSocket과 로그에는 파생된 숫자와 enum만 전달합니다.
-
-## 사용 기술
-
-| 기술 | 역할 |
-|---|---|
-| Python 3.11/3.12 | 애플리케이션과 비전 파이프라인 구현 |
-| FastAPI · Uvicorn | REST API, WebSocket, OpenAPI 문서, 앱 lifecycle |
-| Pydantic Settings | 요청·응답 스키마와 환경 설정 검증 |
-| OpenCV | 카메라 획득, 프레임 처리, `solvePnP` 머리 자세 계산 |
-| MediaPipe Face Landmarker | 얼굴·눈·홍채 랜드마크 추출 |
-| NumPy | 시선 특징, affine 캘리브레이션, 수치 연산 |
-| Ultralytics YOLO11n | 선택적 휴대폰 탐지; 기본 설치에서는 비활성화 |
-| SQLAlchemy · SQLite | 세션, 파생 이벤트, 상태 전환, 캘리브레이션 저장 |
-| SQLite WAL | 분석 쓰기와 API 읽기의 경합 완화 |
-| Pytest | 수학, 상태 머신, API, WebSocket, DB 동시성 테스트 |
-| Ruff | lint와 코드 포맷 검사 |
-
-### 시선 추정
-
-MediaPipe가 반환한 홍채 중심과 눈 모서리의 상대 비율을 좌우 눈에서 계산합니다. 원본 카메라와
-화면 좌표의 좌우 방향 차이를 보정한 뒤, 캘리브레이션이 있으면 다음 affine 변환으로 화면의
-정규화 좌표를 추정합니다.
-
-```text
-screen_x = a0 + a1 * feature_x + a2 * feature_y
-screen_y = b0 + b1 * feature_x + b2 * feature_y
-```
-
-캘리브레이션 학습은 표본 품질에 따른 weighted least squares를 사용합니다. 캘리브레이션이
-없으면 제한된 홍채 비율 모드로 동작하며 confidence를 최대 0.4로 제한합니다. 기본 임계값에서는
-이 결과를 확정 상태로 과장하지 않고 `unknown`으로 유지합니다.
-
-### 머리 자세
-
-코끝, 턱, 눈꼬리, 입꼬리 랜드마크와 3D 기준 얼굴점을 `cv2.solvePnP`에 입력하여 회전 벡터를
-구하고 yaw·pitch·roll로 변환합니다. 중앙 캘리브레이션에서 얻은 개인별 중립 자세를 영점으로
-사용하므로 노트북 카메라 위치와 자연스러운 앉은 자세의 편향을 줄일 수 있습니다.
-
-### 시간축 상태
-
-한 프레임의 시선 구역을 곧바로 세션 상태로 사용하지 않습니다.
-
-```text
-frame signals
-  → exponential moving average
-  → recent-zone majority vote
-  → confidence gate
-  → debounce / minimum duration
-  → screen_facing | looking_away | face_missing | unknown
-```
-
-이 상태는 관찰 결과를 시간축으로 안정화한 값일 뿐 집중도나 행동 의도를 의미하지 않습니다.
-
-## 활용 분야와 통합 방법
-
-GazeSignal API는 판정 엔진보다 **시각 입력을 구조화된 이벤트로 바꾸는 기반 계층**에 가깝습니다.
-REST로 lifecycle과 누적 결과를 관리하고 WebSocket으로 최신 이벤트를 구독할 수 있어 다음과
-같은 분야에 연결할 수 있습니다.
-
-### HCI·사용성 연구
-
-- 화면 레이아웃별 대략적인 시선 구역 변화 기록
-- UI 요소 배치 실험에서 정규화 좌표와 head pose를 시간축 데이터로 결합
-- 사용자가 동의한 연구 세션에서 별도 분석 도구로 JSON/CSV 내보내기
-
-정밀 시선 고정점 연구가 필요하면 전문 아이트래커 adapter를 추가하고 동일한 이벤트 스키마를
-유지하는 방식으로 확장할 수 있습니다.
-
-### 화상 협업과 발표 보조
-
-- 카메라 방향과 화면 방향의 차이를 로컬 피드백 UI로 표시
-- 얼굴이 프레임 밖으로 벗어난 상태나 카메라 구도 변화를 사용자 본인에게 안내
-- 영상 자체를 중앙 서버로 추가 전송하지 않고 클라이언트에서 파생 신호만 활용
-
-### 접근성·비접촉 인터랙션 실험
-
-- 좌·우·상·하 구역을 큰 UI 탐색 명령으로 매핑하는 프로토타입
-- head pose와 시선 구역을 결합한 hands-free 인터페이스 연구
-- 사용자별 5점·9점 캘리브레이션을 이용한 장치 적응
-
-현재 구현은 의료기기나 접근성 보조기기의 안전성 요구사항을 충족한다고 주장하지 않으며,
-실사용 전 별도의 정확도·실패 안전성 검증이 필요합니다.
-
-### 온라인 평가·구조화된 원격 세션
-
-- 세션 중 얼굴 존재 여부와 센서 가용성을 운영 상태로 표시
-- 시선 이탈이나 장치 노출 이벤트를 타임라인의 검토 가능한 맥락으로 제공
-- 단일 이벤트를 규정 위반으로 변환하지 않고 원인 확인이 가능한 관찰 자료로 유지
-
-점수화, 자동 제재, 의도 추론은 이 API의 범위가 아닙니다. 통합 애플리케이션도 사전 고지,
-접근성 예외, 데이터 삭제와 사람의 맥락 검토를 제공해야 합니다.
-
-### 인터랙티브 키오스크·전시·미디어
-
-- 사용자가 카메라 기반 상호작용에 동의한 공간에서 얼굴 존재 상태로 UI 활성화
-- 대략적인 방향 신호에 따라 콘텐츠 영역을 전환하는 실험
-- 얼굴 인식이나 신원 식별 없이 세션 단위 상호작용 구현
-
-## 확장 구조
-
-각 계층은 공개 스키마를 중심으로 분리되어 있습니다.
-
-```text
-src/gaze_signal_api/
-├── api/           REST/WebSocket, 오류 매핑, app lifecycle
-├── capture/       카메라 획득, 장치 probe, size-one buffer
-├── vision/        landmark, gaze, head pose, object detector adapter
-├── analytics/     smoothing, state machine, session summary
-├── calibration/   weighted affine fit/apply
-├── runtime/       capture/analysis thread와 lifecycle
-├── storage/       SQLAlchemy model, database, repository
-├── schemas/       Pydantic 공개/domain contract
-├── config/        환경 설정과 validation
-└── static/        로컬 calibration console
-```
-
-확장 가능한 방향은 다음과 같습니다.
-
-- `Capture` 경계에 RTSP, 브라우저 WebRTC, 가상 카메라 adapter 추가
-- MediaPipe 대신 다른 landmark·gaze model을 `FrameSignals` 계약 뒤에 연결
-- 전문 아이트래커 입력을 같은 정규화 좌표와 품질 필드로 변환
-- phone detector를 다른 객체 감지 모델이나 조직별 detector로 교체
-- SQLite repository를 PostgreSQL·시계열 저장소 adapter로 교체
-- 프로세스 내부 EventHub를 Redis Streams, NATS, Kafka 등으로 교체
-- API gateway에서 인증, TLS, rate limit, tenant isolation 추가
-- OpenTelemetry metrics와 구조화된 운영 관측성 추가
-- 보존 기간, 집계, 익명화, 사용자 export 정책 추가
-- 캘리브레이션 drift 감지와 장치별 품질 평가 자동화
-
-현재 기본 구성은 한 컴퓨터에서 한 카메라를 처리하는 로컬 MVP입니다. 원격·다중 사용자 환경에
-배포하려면 인증, 암호화, tenant 격리, 보존 정책과 동의 증빙을 먼저 설계해야 합니다.
-
-## 빠른 시작
-
-Python 3.11 또는 3.12를 사용합니다. macOS에서는 명령을 실행하는 Terminal이나 Python
-실행기에 카메라 권한이 필요합니다.
+**2. 코드 받기와 설치**
 
 ```bash
 git clone https://github.com/100bee/gaze-signal-api.git
@@ -194,76 +62,157 @@ cd gaze-signal-api
 
 python3.12 -m venv .venv
 source .venv/bin/activate
-pip install -e '.[dev,vision]'
+pip install -e ".[dev,vision]"
 python scripts/download_models.py
-cp .env.example .env
+```
+
+마지막 명령은 얼굴 랜드마크 모델을 `models/` 폴더에 내려받고 체크섬을 확인합니다.
+
+**3. 서버 실행**
+
+```bash
 gaze-signal-api
 ```
 
-기본 주소:
+브라우저에서 <http://127.0.0.1:8000> 을 열면 로컬 콘솔이 나옵니다.
 
-- 로컬 콘솔: <http://127.0.0.1:8000>
-- OpenAPI/Swagger UI: <http://127.0.0.1:8000/docs>
-- 상태 확인: <http://127.0.0.1:8000/health>
+**4. 카메라 권한**
 
-서버는 기본적으로 `127.0.0.1`에만 바인딩합니다. 다른 origin을 연결하려면 `.env`의
-`GAZE_SIGNAL_ALLOWED_ORIGINS`를 설정합니다. localhost 외부에 공개하기 전에는 이 저장소의
-MVP에 포함되지 않은 인증, TLS와 rate limit을 추가해야 합니다.
+처음 카메라를 켤 때 macOS가 권한을 묻습니다. 허용하지 않았다면
+**시스템 설정 → 개인정보 보호 및 보안 → 카메라**에서 사용 중인 터미널 앱을 켜고, 터미널을 다시 실행하세요.
 
-### macOS 라이브 미리보기
+**5. 라이브 미리보기 (선택)**
 
-실제 카메라 영상 위에 시선 구역, 추정 위치, 얼굴 상태와 head pose를 표시합니다.
+카메라 화면 위에 분석 결과를 겹쳐 보여 주는 디버깅 창입니다. 영상은 저장하지 않습니다.
 
 ```bash
-python -m gaze_signal_api.preview --consent --camera 0
+gaze-signal-preview --consent --camera 0
 ```
 
-MacBook 내장 카메라가 1번으로 잡히는 환경에서는 다음과 같이 실행합니다.
+iPhone 연속성 카메라가 연결된 Mac에서는 내장 카메라가 1번일 수 있습니다. 화면이 검게 나오면 `--camera 1`로 다시 실행하세요.
+`Q`나 `Esc`로 종료하고, `M`으로 좌우 반전을 바꿉니다.
 
-```bash
-python -m gaze_signal_api.preview --consent --camera 1
+## 설치와 실행: Windows
+
+아래 명령은 PowerShell 기준입니다.
+
+**1. Python 3.12 설치**
+
+[python.org](https://www.python.org/downloads/windows/)에서 Windows installer (64-bit)를 받아 설치합니다.
+설치 첫 화면에서 **Add python.exe to PATH**를 체크하세요. 설치 후 확인합니다.
+
+```powershell
+py -3.12 --version
 ```
 
-`Q` 또는 `Esc`로 종료하고 `M`으로 미러 표시를 전환합니다. 이 창은 로컬 디버깅 도구이며
-영상을 저장하거나 API로 전송하지 않습니다. 저장된 캘리브레이션을 적용하려면 다음을 사용합니다.
+**2. 코드 받기와 설치**
 
-```bash
-python -m gaze_signal_api.preview --consent --camera 1 --calibration-id latest
+```powershell
+git clone https://github.com/100bee/gaze-signal-api.git
+cd gaze-signal-api
+
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -e ".[dev,vision]"
+python scripts\download_models.py
 ```
+
+`Activate.ps1`이 실행 정책 오류로 막히면, 현재 창에서만 허용한 뒤 다시 실행합니다.
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.\.venv\Scripts\Activate.ps1
+```
+
+**3. 서버 실행**
+
+```powershell
+gaze-signal-api
+```
+
+브라우저에서 <http://127.0.0.1:8000> 을 열면 로컬 콘솔이 나옵니다.
+
+**4. 카메라 권한**
+
+**설정 → 개인 정보 및 보안 → 카메라**에서 **카메라 액세스**와 **데스크톱 앱이 카메라에 액세스하도록 허용**을 모두 켜세요.
+Zoom, Teams 같은 앱이 카메라를 쓰고 있으면 열리지 않으니 먼저 종료합니다.
+
+**5. 라이브 미리보기 (선택)**
+
+```powershell
+gaze-signal-preview --consent --camera 0
+```
+
+외장 웹캠을 연결했다면 `--camera 1`일 수 있습니다.
+
+## 처음 써 보기
+
+서버를 켠 뒤 <http://127.0.0.1:8000> 콘솔에서 다음 순서로 진행합니다.
+
+1. 카메라 분석 동의 체크박스를 선택하고 **시작**을 누릅니다.
+2. 실시간 상태, 시선 구역, 머리 방향이 갱신되는지 확인합니다.
+3. 시선 구역을 쓰려면 **캘리브레이션**을 실행합니다. 5점 또는 9점 표적을 차례로 바라보면 됩니다.
+4. 캘리브레이션이 저장되면 **시작**을 다시 누릅니다. 같은 콘솔 화면에서 시작하는 세션은 이 보정값을 씁니다.
+   페이지를 새로고침하면 콘솔은 보정값을 잊으므로 다시 캘리브레이션해야 합니다.
+
+캘리브레이션 없이도 얼굴 부재와 머리를 크게 돌린 시선 이탈은 판정됩니다.
+다만 눈동자 위치만으로 정하는 시선 구역은 정확도가 낮아서, 상태를 `unknown`으로 남겨 둡니다.
+
+브라우저 탭을 닫으면 콘솔이 세션 중지를 보내 카메라가 꺼집니다.
+
+상태 확인과 API 문서는 다음 주소에 있습니다.
+
+| 주소 | 내용 |
+|---|---|
+| <http://127.0.0.1:8000/health> | DB, OpenCV, MediaPipe, 모델 파일 설치 상태 |
+| <http://127.0.0.1:8000/docs> | 모든 API를 브라우저에서 직접 호출해 볼 수 있는 Swagger UI |
 
 ## API 사용 예
 
-먼저 통합 UI에서 카메라 처리 목적과 데이터 정책을 알리고 동의를 받은 뒤 세션을 생성합니다.
+세션은 **생성 → 시작 → 중지 → 요약 조회 → 삭제** 순서로 씁니다.
+세션을 만들기 전에, 통합하는 앱의 화면에서 카메라 사용 목적을 알리고 동의를 받아야 합니다.
+
+**macOS 터미널 (bash, zsh)**
 
 ```bash
-curl -s http://127.0.0.1:8000/sessions \
+SESSION_ID=$(curl -s http://127.0.0.1:8000/sessions \
   -H 'content-type: application/json' \
-  -d '{
-    "consent_given": true,
-    "camera_index": 0,
-    "frame_width": 640,
-    "frame_height": 480,
-    "target_fps": 15,
-    "yolo_enabled": false
-  }'
+  -d '{"consent_given": true, "camera_index": 0, "frame_width": 640, "frame_height": 480, "target_fps": 15}' \
+  | python3 -c 'import json, sys; print(json.load(sys.stdin)["id"])')
+
+curl -X POST "http://127.0.0.1:8000/sessions/$SESSION_ID/start"
+curl "http://127.0.0.1:8000/sessions/$SESSION_ID/events?limit=100&offset=0"
+curl -X POST "http://127.0.0.1:8000/sessions/$SESSION_ID/stop"
+curl "http://127.0.0.1:8000/sessions/$SESSION_ID/summary"
+curl -X DELETE "http://127.0.0.1:8000/sessions/$SESSION_ID"
 ```
 
-응답의 `id`로 세션을 제어합니다.
+`?`와 `&`가 들어간 주소는 꼭 따옴표로 감싸세요. zsh는 따옴표가 없으면 `no matches found` 오류를 냅니다.
 
-```bash
-curl -X POST http://127.0.0.1:8000/sessions/SESSION_ID/start
-curl http://127.0.0.1:8000/sessions/SESSION_ID/events?limit=100\&offset=0
-curl -X POST http://127.0.0.1:8000/sessions/SESSION_ID/stop
-curl http://127.0.0.1:8000/sessions/SESSION_ID/summary
+**Windows PowerShell**
+
+```powershell
+$api = "http://127.0.0.1:8000"
+$body = '{"consent_given": true, "camera_index": 0, "frame_width": 640, "frame_height": 480, "target_fps": 15}'
+$session = Invoke-RestMethod -Method Post -Uri "$api/sessions" -ContentType "application/json" -Body $body
+
+Invoke-RestMethod -Method Post -Uri "$api/sessions/$($session.id)/start"
+Invoke-RestMethod "$api/sessions/$($session.id)/events?limit=100&offset=0"
+Invoke-RestMethod -Method Post -Uri "$api/sessions/$($session.id)/stop"
+Invoke-RestMethod "$api/sessions/$($session.id)/summary"
+Invoke-RestMethod -Method Delete -Uri "$api/sessions/$($session.id)"
 ```
 
-실시간 이벤트는 다음 WebSocket에서 받습니다.
+PowerShell의 `curl`은 실제 curl이 아니라 다른 명령의 별칭이라서 위 bash 예시가 그대로 동작하지 않습니다.
+
+**실시간 이벤트**
+
+세션이 실행 중일 때 다음 WebSocket에 연결하면 분석한 프레임마다 최신 이벤트를 받습니다.
+받는 쪽이 느리면 오래된 이벤트는 건너뛰고 최신 것만 보냅니다.
 
 ```text
-ws://127.0.0.1:8000/ws/sessions/SESSION_ID
+ws://127.0.0.1:8000/ws/sessions/{SESSION_ID}
 ```
-
-예시 이벤트:
 
 ```json
 {
@@ -285,78 +234,210 @@ ws://127.0.0.1:8000/ws/sessions/SESSION_ID
 }
 ```
 
-`confidence`는 통계적으로 보정된 정확도 확률이 아니라 모델 가용성, 특징 품질과 캘리브레이션
-오차를 조합한 휴리스틱 품질 게이트입니다.
+`state`는 다음 네 값 중 하나입니다.
 
-더 많은 요청·응답 예시는 [API 예시](docs/api_examples.md)를 참고하세요.
+| 값 | 뜻 |
+|---|---|
+| `screen_facing` | 화면 쪽을 보고 있음 |
+| `looking_away` | 화면 밖을 1초 이상 보고 있음 |
+| `face_missing` | 얼굴이 보이지 않음 |
+| `unknown` | 판단할 근거가 부족함 |
 
-## 선택적 휴대폰 감지
+`confidence`는 확률이 아닙니다. 모델 가용성, 특징 품질, 캘리브레이션 오차를 조합한 품질 기준값입니다.
+
+더 많은 요청과 응답 예시는 [API 예시](docs/api_examples.md)에 있습니다.
+
+## 설정
+
+설정은 환경 변수나 저장소 최상위의 `.env` 파일로 바꿉니다. 예시 파일을 복사해서 시작하세요.
 
 ```bash
-pip install -e '.[yolo]'
-python scripts/download_models.py --include-yolo
-GAZE_SIGNAL_YOLO_ENABLED=true gaze-signal-api
+cp .env.example .env              # macOS
+Copy-Item .env.example .env       # Windows PowerShell
 ```
 
-Ultralytics는 AGPL-3.0 또는 상용 라이선스를 제공합니다. 배포 형태에 맞는 라이선스를 반드시
-검토해야 합니다. YOLO weight가 없거나 초기화에 실패해도 얼굴·시선 분석은 계속되도록 격리되어
-있습니다. 자세한 내용은 [제3자 고지](THIRD_PARTY_NOTICES.md)에 있습니다.
+자주 바꾸는 값은 다음과 같습니다. 모두 `GAZE_SIGNAL_`로 시작합니다.
 
-## 개인정보 보호 경계
+| 변수 | 기본값 | 설명 |
+|---|---|---|
+| `GAZE_SIGNAL_HOST` | `127.0.0.1` | 서버 주소. 바꾸지 않는 것을 권장 |
+| `GAZE_SIGNAL_PORT` | `8000` | 서버 포트 |
+| `GAZE_SIGNAL_ALLOWED_ORIGINS` | 8000번 포트의 localhost 두 개 | API와 WebSocket을 부를 수 있는 웹 주소 목록 |
+| `GAZE_SIGNAL_DATABASE_URL` | `sqlite:///./data/gaze_signal_api.db` | 세션과 이벤트를 저장할 DB |
+| `GAZE_SIGNAL_FACE_MODEL_PATH` | `models/face_landmarker.task` | 얼굴 랜드마크 모델 위치 |
+| `GAZE_SIGNAL_AWAY_MIN_DURATION_MS` | `1000` | 이 시간 이상 화면 밖을 봐야 `looking_away` |
+| `GAZE_SIGNAL_DEBOUNCE_MS` | `350` | 다른 상태로 바뀌기 전 기다리는 시간 |
 
-- 원본 프레임, 얼굴 crop, landmark overlay를 저장하거나 API로 전송하지 않습니다.
-- 얼굴 embedding, 얼굴 인식, 신원 식별과 감정 추론을 구현하지 않습니다.
-- 오디오, 화면 내용, 키 입력, 클립보드와 창 제목을 수집하지 않습니다.
-- 카메라 시작과 장치 probe에는 명시적인 동의가 필요합니다.
-- 세션과 캘리브레이션 삭제 API를 제공합니다.
-- `GAZE_SIGNAL_STORE_RAW_FRAMES=true`는 설정 validation에서 거부됩니다.
-- 상태와 confidence를 사람에 대한 점수·순위·자동 제재에 사용하도록 설계하지 않았습니다.
+포트를 바꾸면 `GAZE_SIGNAL_ALLOWED_ORIGINS`도 같은 포트로 바꿔야 합니다. 그대로 두면 콘솔의 실시간 연결이 거부됩니다.
 
-SQLite에 저장되는 파생 특징도 개인 관련 데이터로 취급해야 합니다. 실제 배포자는 짧은 보존
-기간, 접근 제어, 삭제·export 흐름, 동의 철회와 관할 법률 검토를 추가해야 합니다.
+```dotenv
+GAZE_SIGNAL_PORT=9000
+GAZE_SIGNAL_ALLOWED_ORIGINS=["http://127.0.0.1:9000","http://localhost:9000"]
+```
 
-자세한 데이터 흐름과 위협 모델은 [개인정보·윤리 경계](docs/privacy.md)에 있습니다.
+카메라 번호, 해상도, fps, 휴대폰 감지 여부는 환경 변수가 아니라 **세션을 만드는 요청 본문**에서 정합니다.
 
-## 테스트와 검증
+서버는 내 컴퓨터(`127.0.0.1`)에서만 접속을 받습니다. 인증, TLS, 요청 제한이 없으므로 다른 기기에 공개하지 마세요.
+
+## 휴대폰 감지 켜기
+
+휴대폰 감지는 Ultralytics YOLO를 쓰는 선택 기능입니다. 기본 설치에는 들어 있지 않습니다.
 
 ```bash
-.venv/bin/pytest
-.venv/bin/ruff check .
-.venv/bin/ruff format --check .
+pip install -e ".[dev,vision,yolo]"
+python scripts/download_models.py --include-yolo
+```
+
+설치 후에는 세션마다 켭니다. 콘솔에서는 휴대폰 감지 체크박스를 선택하고,
+API에서는 세션 생성 요청에 `"yolo_enabled": true`를 넣습니다. 미리보기 창은 `--yolo` 옵션을 씁니다.
+
+YOLO는 10프레임마다 한 번만 실행해 부담을 줄입니다. 모델이 없거나 실패해도 얼굴과 시선 분석은 계속됩니다.
+
+Ultralytics는 AGPL-3.0 또는 상용 라이선스입니다. 배포 전에 라이선스를 꼭 확인하세요.
+자세한 내용은 [제3자 고지](THIRD_PARTY_NOTICES.md)에 있습니다.
+
+## 동작 원리
+
+```mermaid
+flowchart LR
+    Camera[웹캠] --> Capture[카메라 스레드]
+    Capture -->|최신 프레임 1장만| Buffer[프레임 버퍼]
+    Buffer --> Vision[MediaPipe + OpenCV 분석]
+    Vision -. 선택 .-> YOLO[YOLO 휴대폰 감지]
+    Vision --> Temporal[시간축 안정화]
+    YOLO --> Temporal
+    Temporal --> DB[(SQLite)]
+    Temporal --> WS[WebSocket]
+    DB --> REST[REST API]
+    WS --> Client[연동 앱]
+    REST --> Client
+```
+
+카메라 스레드와 분석 스레드 사이에는 가장 최근 프레임 한 장만 둡니다.
+분석이 카메라보다 느려도 오래된 프레임이 쌓이지 않고, 지연이 계속 늘어나지 않습니다.
+원본 프레임은 이 그림의 왼쪽 세 칸을 벗어나지 않습니다.
+
+**시선 구역.** 양쪽 눈에서 눈꼬리 사이 어디에 홍채가 있는지 비율을 구합니다.
+캘리브레이션이 있으면 이 비율을 다음 식으로 화면 좌표로 바꾼 뒤 구역을 정합니다.
+
+```text
+screen_x = a0 + a1 * feature_x + a2 * feature_y
+screen_y = b0 + b1 * feature_x + b2 * feature_y
+```
+
+계수는 캘리브레이션 표본을 품질에 따라 가중치를 준 최소제곱법으로 구합니다.
+캘리브레이션이 없으면 비율을 그대로 쓰고 confidence를 0.4로 제한합니다. 기본 기준값 0.45보다 낮아서 상태는 `unknown`으로 남습니다.
+
+**머리 방향.** 코끝, 턱, 눈꼬리, 입꼬리 위치를 OpenCV `solvePnP`에 넣어 회전 각도를 구합니다.
+좌우 회전이 30도, 위아래 기울기가 25도를 넘으면 캘리브레이션 여부와 상관없이 화면 밖으로 봅니다.
+캘리브레이션을 했다면 가운데 표적을 볼 때의 자세를 기준점으로 써서, 카메라 위치와 평소 앉은 자세의 차이를 줄입니다.
+
+**눈 깜빡임.** 눈의 세로 길이와 가로 길이의 비율을 픽셀 기준으로 계산합니다. 비율이 0.15 아래로 떨어지는 순간을 깜빡임 한 번으로 셉니다.
+해상도나 화면비가 달라도 같은 기준이 적용됩니다.
+
+**시간축 안정화.** 한 프레임의 결과를 곧바로 상태로 쓰지 않습니다.
+
+```text
+프레임 신호
+  → 머리 각도 지수이동평균
+  → 최근 5프레임 시선 구역 다수결
+  → confidence 기준값 확인
+  → 상태 전환 대기 (기본 350ms, 화면 밖은 1초)
+  → screen_facing | looking_away | face_missing | unknown
+```
+
+이 결과는 관찰을 시간에 따라 안정화한 값일 뿐, 집중이나 의도를 뜻하지 않습니다.
+
+## 개인정보 보호
+
+- 원본 프레임, 얼굴 이미지, 랜드마크를 그린 화면을 저장하거나 전송하지 않습니다.
+- 얼굴 인식, 신원 확인, 감정 추론 기능이 없습니다.
+- 소리, 화면 내용, 키 입력, 클립보드, 창 제목을 수집하지 않습니다.
+- 카메라를 켜거나 카메라 목록을 조회할 때 명시적인 동의 값이 필요합니다.
+- 세션과 캘리브레이션을 삭제하는 API가 있습니다.
+- `GAZE_SIGNAL_STORE_RAW_FRAMES=true`로 설정하면 서버가 시작되지 않습니다.
+
+SQLite에 저장되는 파생 신호도 개인과 관련된 데이터입니다.
+실제로 배포한다면 짧은 보존 기간, 접근 제어, 삭제와 내보내기, 동의 철회, 관련 법률 검토를 추가해야 합니다.
+데이터 흐름과 위협 모델은 [개인정보·윤리 경계](docs/privacy.md)에 정리되어 있습니다.
+
+## 테스트
+
+가상환경을 켠 상태에서 실행합니다. 명령은 macOS와 Windows가 같습니다.
+
+```bash
+pytest
+ruff check .
+ruff format --check .
 python scripts/evaluate_zones.py examples/evaluation_sample.csv
 ```
 
-자동 테스트는 시선 구역, head-pose 변환, affine calibration, EMA, debounce, 상태 전환,
-세션 요약, 요청 validation, CRUD, WebSocket, SQLite 동시 쓰기와 카메라 실패를 검사합니다.
+자동 테스트는 시선 구역 분류, 머리 각도 변환, 캘리브레이션 계산, 깜빡임 비율, 상태 전환,
+세션 요약, 카메라 점유, 서버 재시작 복구, 입력 검증, WebSocket, SQLite 동시 쓰기를 확인합니다.
+OpenCV가 없으면 일부 테스트는 건너뜁니다.
 
-실제 MacBook 카메라에서는 640×480 입력으로 MediaPipe Face Landmarker의 end-to-end 동작과
-로컬 프레임 처리를 확인했습니다. 해당 실행은 동작 확인용 smoke test이며 다양한 사용자·조명·안경·
-장치 조건의 정확도를 의미하지 않습니다. 재현 명령과 남은 검증 항목은
-[실기기 검증 기록](docs/hardware-validation.md)에 있습니다.
+실제 기기 검증은 MacBook 카메라 640×480 입력으로 MediaPipe 분석이 처음부터 끝까지 동작하는지 확인한 수준입니다.
+여러 사람, 조명, 안경, 장치에 대한 정확도는 아직 측정하지 않았습니다.
+재현 방법과 남은 검증 항목은 [실기기 검증 기록](docs/hardware-validation.md)에 있습니다.
 
 ## 알려진 한계
 
-- 강한 안경 반사, 얼굴 가림, 저조도, 역광과 모션 블러에 민감합니다.
-- 카메라 각도와 화면 배치가 바뀌면 다시 캘리브레이션해야 합니다.
-- 전문 아이트래커 수준의 시선 정확도와 sampling rate를 제공하지 않습니다.
-- YOLO 휴대폰 감지는 선택 기능이며 실물·가림 조건별 추가 평가가 필요합니다.
-- 기본 서버에는 원격 배포용 사용자 인증과 tenant isolation이 없습니다.
-- 현재 `confidence`는 확률 보정된 모델 신뢰도가 아닙니다.
+- 안경 반사, 얼굴 가림, 어두운 조명, 역광, 빠른 움직임에 약합니다.
+- 카메라 위치나 모니터 배치가 바뀌면 캘리브레이션을 다시 해야 합니다.
+- 전문 아이트래커 수준의 정확도와 측정 속도를 내지 못합니다.
+- 휴대폰 감지는 실물 휴대폰과 가림 조건에서 아직 평가하지 않았습니다.
+- 인증과 사용자 분리가 없어서 한 컴퓨터, 한 사용자용입니다.
+- Windows는 실제 카메라로 아직 검증하지 않았습니다.
 
-불확실한 조건에서는 억지로 방향을 결정하기보다 낮은 confidence, `unknown`,
-`face_missing` 또는 명시적인 기능 저하 상태를 반환합니다.
+확실하지 않을 때는 억지로 방향을 정하지 않고 낮은 confidence, `unknown`, `face_missing`,
+또는 분석 불가 상태를 돌려줍니다.
+
+## 활용 분야와 확장
+
+이 API는 판정 엔진이 아니라, 카메라 입력을 구조화된 이벤트로 바꾸는 기반 계층입니다.
+
+| 분야 | 예시 |
+|---|---|
+| 사용성 연구 | 화면 레이아웃별 시선 구역 변화를 시간축 데이터로 기록 |
+| 화상 회의, 발표 연습 | 얼굴이 화면 밖으로 나갔거나 카메라 구도가 바뀐 것을 본인에게 알림 |
+| 비접촉 인터랙션 실험 | 상하좌우 구역과 머리 방향을 큰 UI 탐색 명령으로 연결 |
+| 구조화된 원격 세션 | 얼굴 존재와 센서 상태를 운영 정보로 표시하고, 이벤트를 사람이 검토할 맥락으로 제공 |
+| 키오스크, 전시 | 동의한 공간에서 얼굴 존재로 화면을 깨우는 상호작용 |
+
+점수 매기기, 자동 제재, 의도 추론은 범위 밖입니다. 연동하는 앱은 사전 고지, 접근성 예외, 데이터 삭제, 사람의 검토를 함께 제공해야 합니다.
+의료기기나 접근성 보조기기로 쓰려면 별도의 정확도와 안전성 검증이 필요합니다.
+
+코드는 계층별로 나뉘어 있어서, 한 부분을 다른 구현으로 바꾸기 쉽습니다.
+
+```text
+src/gaze_signal_api/
+├── api/           REST, WebSocket, 오류 응답, 앱 시작과 종료
+├── capture/       카메라 획득, 장치 조회, 최신 프레임 버퍼
+├── vision/        얼굴 랜드마크, 시선, 머리 방향, 휴대폰 감지
+├── analytics/     평활화, 상태 전환, 세션 요약
+├── calibration/   캘리브레이션 계산과 적용
+├── runtime/       카메라와 분석 스레드, 세션 수명 주기
+├── storage/       SQLAlchemy 모델과 저장소
+├── schemas/       Pydantic 요청, 응답, 도메인 모델
+├── config/        환경 설정과 검증
+└── static/        로컬 콘솔
+```
+
+바꿔 끼울 수 있는 예로는 RTSP나 브라우저 카메라 입력, 다른 랜드마크 모델, 전문 아이트래커 입력,
+PostgreSQL 같은 다른 저장소, Redis나 Kafka 같은 이벤트 전달 계층이 있습니다.
+다른 기기나 여러 사용자에게 제공하려면 인증, 암호화, 사용자 분리, 보존 정책, 동의 기록을 먼저 설계해야 합니다.
 
 ## 문서
 
 - [아키텍처](docs/architecture.md)
 - [API 예시](docs/api_examples.md)
 - [요구사항과 범위](docs/requirements.md)
-- [평가 프로토콜](docs/evaluation.md)
+- [평가 방법](docs/evaluation.md)
 - [실기기 검증 기록](docs/hardware-validation.md)
 - [개인정보·윤리 경계](docs/privacy.md)
 - [제3자 라이선스 고지](THIRD_PARTY_NOTICES.md)
 
 ## 라이선스
 
-프로젝트의 자체 코드는 [MIT License](LICENSE)로 제공됩니다. MediaPipe, OpenCV 및 선택적
-Ultralytics를 포함한 제3자 구성요소와 모델 weight에는 각각의 라이선스가 적용됩니다.
+이 프로젝트의 코드는 [MIT License](LICENSE)를 따릅니다.
+MediaPipe, OpenCV, 선택 기능인 Ultralytics와 각 모델 파일에는 각자의 라이선스가 적용됩니다.

@@ -92,13 +92,19 @@ class Repository:
     def fail_stale_running_sessions(self) -> int:
         """Recover database state after an unclean process exit."""
 
+        # End at the last stored event, not at restart time, or the summary counts the downtime.
+        last_event_at = (
+            select(func.max(AnalysisEventRow.timestamp))
+            .where(AnalysisEventRow.session_id == SessionRow.id)
+            .scalar_subquery()
+        )
         with self.database.session_factory.begin() as db:
             result = db.execute(
                 update(SessionRow)
                 .where(SessionRow.status == SessionStatus.RUNNING.value)
                 .values(
                     status=SessionStatus.FAILED.value,
-                    stopped_at=utc_now(),
+                    stopped_at=func.coalesce(last_event_at, SessionRow.started_at),
                     failure_code="server_restarted",
                 )
             )

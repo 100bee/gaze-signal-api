@@ -96,7 +96,7 @@ class VisionPipeline:
         relative_pose = self._relative_pose(smoothed_pose)
         gaze = self.gaze.estimate(observation.landmarks, relative_pose, observation.confidence)
         zone = self.zone_smoother.update(gaze.zone)
-        ear = eye_aspect_ratio(observation.landmarks)
+        ear = eye_aspect_ratio(observation.landmarks, width / height)
         eyes_closed = ear is not None and ear < self.settings.blink_ear_threshold
         blink_detected = eyes_closed and not self._eyes_closed
         self._eyes_closed = eyes_closed

@@ -143,7 +143,9 @@ class SessionRunner:
                         break
                     continue
                 current = time.monotonic()
-                if current - last_processed < min_interval:
+                # Frames arrive with jitter; a strict gate drops every other frame
+                # when the camera already delivers the target fps.
+                if current - last_processed < min_interval * 0.9:
                     continue
                 last_processed = current
                 signal = self.pipeline.process(frame)

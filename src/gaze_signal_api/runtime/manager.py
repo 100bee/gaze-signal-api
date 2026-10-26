@@ -108,7 +108,7 @@ class SessionRuntimeManager:
             if session.status != SessionStatus.RUNNING:
                 raise ConflictError(f"cannot stop a session in {session.status.value} state")
             runner = self._runners.pop(str(session_id), None)
-            self._camera_owners.pop(session.camera_index, None)
+            self._release_camera(session.camera_index, session_id)
             if runner is not None:
                 runner.stop()
             current = self.repository.get_session(session_id)
@@ -128,10 +128,15 @@ class SessionRuntimeManager:
             if session.status == SessionStatus.RUNNING:
                 raise ConflictError("stop the running session before deleting it")
             runner = self._runners.pop(str(session_id), None)
-            self._camera_owners.pop(session.camera_index, None)
+            self._release_camera(session.camera_index, session_id)
             if runner is not None:
                 runner.stop()
             self.repository.delete_session(session_id)
+
+    def _release_camera(self, camera_index: int, session_id: UUID) -> None:
+        # A session that never started must not free a camera another session is using.
+        if self._camera_owners.get(camera_index) == str(session_id):
+            del self._camera_owners[camera_index]
 
     def shutdown(self) -> None:
         with self._lock:

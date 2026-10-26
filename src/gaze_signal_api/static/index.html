@@ -208,6 +208,8 @@
   document.addEventListener('fullscreenchange', () => {
     if(calibrationRun && !document.fullscreenElement) cancelCalibration('전체 화면이 종료되어 캘리브레이션을 취소했습니다.');
   });
+  // Closing or reloading the tab must release the camera; the server has no idle timeout.
+  addEventListener('pagehide', () => { if (sessionId) navigator.sendBeacon(`/sessions/${sessionId}/stop`); });
 </script>
 </body>
 </html>

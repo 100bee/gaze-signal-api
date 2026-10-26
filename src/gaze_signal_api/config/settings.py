@@ -40,7 +40,8 @@ class Settings(BaseSettings):
     face_model_path: Path = Path("models/face_landmarker.task")
     face_detection_confidence: float = Field(default=0.55, ge=0.0, le=1.0)
     gaze_confidence_threshold: float = Field(default=0.45, ge=0.0, le=1.0)
-    blink_ear_threshold: float = Field(default=0.20, gt=0.0, lt=1.0)
+    # Pixel-space ratio; equals the old 0.20 normalized threshold at 4:3.
+    blink_ear_threshold: float = Field(default=0.15, gt=0.0, lt=1.0)
     head_yaw_away_degrees: float = Field(default=30.0, ge=5.0, le=90.0)
     head_pitch_away_degrees: float = Field(default=25.0, ge=5.0, le=90.0)
 

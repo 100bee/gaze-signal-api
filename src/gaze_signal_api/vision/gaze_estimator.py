@@ -60,11 +60,9 @@ class GazeEstimator:
             or abs(head_pose.pitch) >= self.pitch_away_degrees
         ):
             # Keep the derived eye feature available to calibration/diagnostics even
-            # when the coarse head-pose rule classifies this frame as away.
-            confidence = face_confidence * 0.8
-            if self.calibration is None:
-                confidence = min(0.4, confidence)
-            return GazeEstimate(GazeZone.AWAY, feature_x, feature_y, confidence)
+            # when the coarse head-pose rule classifies this frame as away. Head pose
+            # needs no calibration, so this path is not capped like the iris path.
+            return GazeEstimate(GazeZone.AWAY, feature_x, feature_y, face_confidence * 0.8)
 
         if self.calibration is not None:
             screen_x, screen_y = apply_calibration(feature_x, feature_y, self.calibration)
@@ -100,15 +98,20 @@ class GazeEstimator:
 
 def eye_aspect_ratio(
     landmarks: tuple[tuple[float, float, float], ...],
+    aspect: float = 1.0,
 ) -> float | None:
-    """Return a two-eye vertical/horizontal openness proxy."""
+    """Return a two-eye vertical/horizontal openness proxy.
+
+    Landmarks are normalized by frame width and height separately, so pass the
+    frame's width / height to get the same ratio at every resolution.
+    """
 
     eye_sets = ((33, 133, 159, 145, 158, 153), (362, 263, 386, 374, 385, 380))
     ratios: list[float] = []
     for outer, inner, upper_a, lower_a, upper_b, lower_b in eye_sets:
         if len(landmarks) <= max(outer, inner, upper_a, lower_a, upper_b, lower_b):
             continue
-        horizontal = abs(landmarks[outer][0] - landmarks[inner][0])
+        horizontal = abs(landmarks[outer][0] - landmarks[inner][0]) * aspect
         vertical_a = abs(landmarks[upper_a][1] - landmarks[lower_a][1])
         vertical_b = abs(landmarks[upper_b][1] - landmarks[lower_b][1])
         if horizontal > 1e-6:

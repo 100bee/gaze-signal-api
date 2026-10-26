@@ -48,11 +48,12 @@ def test_calibrated_gaze_uses_affine_mapping() -> None:
     assert estimate.confidence == 0.95
 
 
-def test_extreme_head_pose_is_away_without_iris_classification() -> None:
+def test_extreme_head_pose_is_away_without_calibration() -> None:
     estimate = GazeEstimator().estimate(landmarks_with_centered_irises(), HeadPose(yaw=40), 0.8)
     assert estimate.zone == GazeZone.AWAY
     assert estimate.feature_x == pytest.approx(0.5)
-    assert estimate.confidence == 0.4
+    # Above the default 0.45 state gate, so an uncalibrated session can report looking_away.
+    assert estimate.confidence == pytest.approx(0.64)
 
 
 @pytest.mark.parametrize(
@@ -71,3 +72,24 @@ def test_uncalibrated_horizontal_feature_converts_raw_image_to_screen_direction(
 
 def test_eye_aspect_ratio_is_available() -> None:
     assert eye_aspect_ratio(landmarks_with_centered_irises()) is not None
+
+
+def _normalized_eyes(width: int, height: int) -> tuple[tuple[float, float, float], ...]:
+    """Both eyes 60 px wide and 18 px open in a frame of the given size."""
+    values = [(0.0, 0.0, 0.0) for _ in range(478)]
+    for outer, inner, upper_a, lower_a, upper_b, lower_b in (
+        (33, 133, 159, 145, 158, 153),
+        (362, 263, 386, 374, 385, 380),
+    ):
+        values[outer] = (290 / width, 200 / height, 0.0)
+        values[inner] = (350 / width, 200 / height, 0.0)
+        for upper, lower in ((upper_a, lower_a), (upper_b, lower_b)):
+            values[upper] = (320 / width, 191 / height, 0.0)
+            values[lower] = (320 / width, 209 / height, 0.0)
+    return tuple(values)
+
+
+@pytest.mark.parametrize(("width", "height"), [(640, 480), (1280, 720), (480, 640)])
+def test_eye_aspect_ratio_matches_pixel_geometry_at_any_resolution(width: int, height: int) -> None:
+    ratio = eye_aspect_ratio(_normalized_eyes(width, height), width / height)
+    assert ratio == pytest.approx(18 / 60)

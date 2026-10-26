@@ -72,6 +72,27 @@ def test_database_event_round_trip_summary_and_cascade(client: TestClient) -> No
         assert db.scalar(select(func.count()).select_from(AnalysisEventRow)) == 0
 
 
+def test_restart_recovery_ends_session_at_last_event(client: TestClient) -> None:
+    repository = client.app.state.repository
+    started = datetime(2026, 1, 1, tzinfo=UTC)
+    with_events = _create_session(client)["id"]
+    without_events = _create_session(client)["id"]
+    for session_id in (with_events, without_events):
+        repository.set_session_status(session_id, SessionStatus.RUNNING, at=started)
+    last = started + timedelta(minutes=30)
+    repository.add_events([_event(with_events, started), _event(with_events, last)])
+
+    assert repository.fail_stale_running_sessions() == 2
+
+    recovered = repository.get_session(with_events)
+    assert recovered.status == SessionStatus.FAILED
+    assert recovered.failure_code == "server_restarted"
+    assert recovered.stopped_at == last
+    assert repository.get_session(without_events).stopped_at == started
+    summary = client.get(f"/sessions/{with_events}/summary").json()
+    assert summary["session_duration_seconds"] == 1800
+
+
 def test_websocket_delivers_latest_analysis_event(client: TestClient) -> None:
     session = _create_session(client)
     session_id = session["id"]

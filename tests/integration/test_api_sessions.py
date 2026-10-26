@@ -87,6 +87,28 @@ def test_stop_timeout_is_not_reported_as_clean_stop(client: TestClient) -> None:
     assert stopped.json()["failure_code"] == "runner_stop_timeout"
 
 
+def test_deleting_another_session_keeps_the_camera_reserved(client: TestClient) -> None:
+    app = client.app
+    app.state.runtime = SessionRuntimeManager(
+        app.state.repository,
+        app.state.event_hub,
+        app.state.settings,
+        runner_factory=NoopRunner,
+    )
+    running = client.post("/sessions", json=_session_payload()).json()
+    assert client.post(f"/sessions/{running['id']}/start").status_code == 200
+
+    unrelated = client.post("/sessions", json=_session_payload()).json()
+    assert client.delete(f"/sessions/{unrelated['id']}").status_code == 204
+
+    contender = client.post("/sessions", json=_session_payload()).json()
+    response = client.post(f"/sessions/{contender['id']}/start")
+    assert response.status_code == 409
+
+    assert client.post(f"/sessions/{running['id']}/stop").status_code == 200
+    assert client.post(f"/sessions/{contender['id']}/start").status_code == 200
+
+
 def test_consent_is_required_before_camera_start(client: TestClient) -> None:
     created = client.post("/sessions", json=_session_payload(consent=False)).json()
     response = client.post(f"/sessions/{created['id']}/start")
